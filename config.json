@@ -1,0 +1,9 @@
+{
+  "interval": 30,
+  "tunnels": [
+    {
+      "remote": { "host": "127.0.0.1", "port": "33028", "user": "root", "ip": "0.0.0.0" },
+      "local": { "port": "80", "ip": "127.0.0.1" }
+    }
+  ]
+}
