@@ -80,6 +80,16 @@ class Tunnel
 
     public function config()
     {
+        $sScriptPath = __DIR__.'/tunnel.php';
+        $sShPath     = __DIR__.'/tunnel.sh';
+        $sShContent  = <<<SH
+#!/bin/sh
+nohup php {$sScriptPath} > /tmp/tunnel-last.log 2>&1 &
+
+SH;
+        file_put_contents($sShPath, $sShContent);
+        chmod($sShPath, 0755);
+
         $arrTunnels = empty($this->m_arrConfig['tunnels']) ? [] : $this->m_arrConfig['tunnels'];
         if (empty($arrTunnels)) {
             throw new InvalidArgumentException("No tunnel was configured.");
@@ -123,7 +133,6 @@ class Tunnel
                 }
             }
         }
-
     }
 
 
@@ -368,13 +377,54 @@ CMD;
 
     public function service()
     {
+        if ($this->win()) {
 
+        } else {
+            $sSelfFile = __FILE__;
+            $this->writeCrontab("* * * * * php {$sSelfFile} >/dev/null 2>&1");
+        }
     }
 
 
     public function unservice()
     {
+        if ($this->win()) {
 
+        } else {
+            $sSelfFile = __FILE__;
+            $this->writeCrontab("# * * * * * php {$sSelfFile} >/dev/null 2>&1");
+            $this->log("Using kill command to stop background ssh connection.");
+        }
+    }
+
+
+    private function writeCrontab($sCronLine)
+    {
+        $sCronFilePath = __DIR__.'/tunnel.cron';
+        file_put_contents($sCronFilePath, $sCronLine.PHP_EOL);
+        $sLastLine = exec('crontab '.$sCronFilePath, $arrOutputs, $nExitCode);
+        if ($nExitCode) {
+            throw new RuntimeException("Execute 'crontab {$sCronFilePath}' failed: [{$nExitCode}] {$sLastLine}");
+        }
+        $sLastLine = exec('crontab -l', $arrOutputs, $nExitCode);
+        echo "Current crontab items: ".PHP_EOL.implode(PHP_EOL, $arrOutputs).PHP_EOL;
+        if ($nExitCode) {
+            throw new RuntimeException("Execute 'crontab -l' failed: [{$nExitCode}] {$sLastLine}");
+        }
+
+        if (empty($arrOutputs)) {
+            throw new RuntimeException("Crontab register failed: [{$nExitCode}]");
+        }
+
+        $bOk = false;
+        foreach ($arrOutputs as $sLine) {
+            if (strpos($sLine, $sCronLine) !== false) {
+                $bOk = true;
+            }
+        }
+        if (!$bOk) {
+            throw new RuntimeException("Modify service as crontab failed, failed write crontab.");
+        }
     }
 
 
