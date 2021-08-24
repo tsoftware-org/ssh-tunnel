@@ -2,8 +2,15 @@
   "interval": 30,
   "tunnels": [
     {
-      "remote": { "host": "127.0.0.1", "port": "33028", "user": "root", "ip": "0.0.0.0" },
+      "comment": "CLIENT -> INTERNET -> REMOTE:PORT -> LOCAL:PORT",
+      "remote": { "host": "123.123.123.123", "port": "33028", "ip": "0.0.0.0" },
       "local": { "port": "80", "ip": "127.0.0.1" }
+    },
+    {
+      "type": "L_to_R",
+      "comment": "CLIENT -> LOCAL:PORT -> INTERNET -> REMOTE:PORT",
+      "local": { "port": "3306", "ip": "127.0.0.1" },
+      "remote": { "host": "123.123.123.123", "port": "3306", "ip": "127.0.0.1" }
     }
   ]
 }

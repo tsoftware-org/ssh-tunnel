@@ -47,12 +47,14 @@ class Tunnel
                 "interval" => 30,
                 "tunnels"  => [
                     [
-                        "remote" => [
+                        "type"    => 'R_to_L',
+                        "comment" => "CLIENT -> INTERNET -> REMOTE:PORT -> LOCAL:PORT",
+                        "remote"  => [
                             "host" => "",
                             "port" => "33028",
                             "ip"   => "0.0.0.0",
                         ],
-                        "local"  => [
+                        "local"   => [
                             "port" => "80",
                             "ip"   => "127.0.0.1",
                         ]
@@ -100,7 +102,7 @@ SH;
     }
 
 
-    public function tunnel()
+    public function tunnel($bLoop = true)
     {
         $this->m_hLockFile = fopen(sys_get_temp_dir().'/.tunnel.lock', 'w');
         if (empty($this->m_hLockFile)) {
@@ -118,10 +120,12 @@ SH;
 
         while (true) {
             foreach ($arrTunnels as $arrTunnel) {
-                //var_dump($arrTunnel);
                 if (!$this->checkSshTunnel($arrTunnel)) {
                     $this->makeSshTunnel($arrTunnel);
                 }
+            }
+            if (!$bLoop) {
+                break;
             }
 
             sleep($this->m_nInterval);
@@ -138,15 +142,16 @@ SH;
 
     private function checkSshTunnel($arrTunnelConfig)
     {
-        $sRemoteHost       = $this->getField($arrTunnelConfig, 'remote', 'host', null);
-        $sRemoteListenIp   = $this->getField($arrTunnelConfig, 'remote', 'ip', '0.0.0.0');
-        $sRemoteListenPort = $this->getField($arrTunnelConfig, 'remote', 'port', null);
-        $sRemoteUser       = $this->getField($arrTunnelConfig, 'remote', 'user', 'tunnel');
+        $sType       = $this->getField($arrTunnelConfig, 'type', null, 'R_to_L');
+        $sRemoteHost = $this->getField($arrTunnelConfig, 'remote', 'host', null);
+        $sRemoteIp   = $this->getField($arrTunnelConfig, 'remote', 'ip', ($sType === 'R_to_L') ? '0.0.0.0' : '127.0.0.1');
+        $sRemotePort = $this->getField($arrTunnelConfig, 'remote', 'port', null);
+        $sRemoteUser = $this->getField($arrTunnelConfig, 'remote', 'user', 'tunnel');
 
         $sLocalIp   = $this->getField($arrTunnelConfig, 'local', 'ip', '0.0.0.0');
         $sLocalPort = $this->getField($arrTunnelConfig, 'local', 'port', false);
 
-        $sId = "{$sRemoteListenIp}:{$sRemoteListenPort}:{$sLocalIp}:{$sLocalPort} {$sRemoteUser}@{$sRemoteHost}";
+        $sId = "{$sRemoteIp}:{$sRemotePort}:{$sLocalIp}:{$sLocalPort} {$sRemoteUser}@{$sRemoteHost}";
         if ($this->win()) {
             $comShell    = new \COM("winmgmts:\\\\.\\root\\CIMV2");
             $arrColItems = $comShell->ExecQuery("SELECT * FROM Win32_Process WHERE Name = 'ssh.exe'", null, 48);
@@ -182,13 +187,22 @@ SH;
 
     private function makeSshTunnel($arrTunnelConfig)
     {
-        $sRemoteHost       = $this->getField($arrTunnelConfig, 'remote', 'host', null);
-        $sRemoteListenIp   = $this->getField($arrTunnelConfig, 'remote', 'ip', '0.0.0.0');
-        $sRemoteListenPort = $this->getField($arrTunnelConfig, 'remote', 'port', null);
-        $sRemoteUser       = $this->getField($arrTunnelConfig, 'remote', 'user', 'tunnel');
+        $sType       = $this->getField($arrTunnelConfig, 'type', null, 'R_to_L');
+        $sRemoteHost = $this->getField($arrTunnelConfig, 'remote', 'host', null);
+        $sRemoteIp   = $this->getField($arrTunnelConfig, 'remote', 'ip', ($sType === 'R_to_L') ? '0.0.0.0' : '127.0.0.1');
+        $sRemotePort = $this->getField($arrTunnelConfig, 'remote', 'port', null);
+        $sRemoteUser = $this->getField($arrTunnelConfig, 'remote', 'user', 'tunnel');
 
-        $sLocalIp   = $this->getField($arrTunnelConfig, 'local', 'ip', '0.0.0.0');
+        $sLocalIp   = $this->getField($arrTunnelConfig, 'local', 'ip', '127.0.0.1');
         $sLocalPort = $this->getField($arrTunnelConfig, 'local', 'port', null);
+
+        if ($sType === 'R_to_L') {
+            $sTypeSlot      = '-CfNg -R';
+            $sIpPortMapSlot = "{$sRemoteIp}:{$sRemotePort}:{$sLocalIp}:{$sLocalPort}";
+        } else {
+            $sTypeSlot      = '-CfNg -L';
+            $sIpPortMapSlot = "{$sLocalIp}:{$sLocalPort}:{$sRemoteIp}:{$sRemotePort}";
+        }
 
         if ($this->win()) {
             $sOutRsa = __DIR__."/.tunnel-{$sRemoteHost}.key";
@@ -203,7 +217,7 @@ SH;
             exec($sWinChmod, $arrOutputs);
             var_dump($arrOutputs);
 
-            $sCmd = "ssh -vvvv -oPasswordAuthentication=no -oStrictHostKeyChecking=no -i {$sOutRsa} -CfNg -R {$sRemoteListenIp}:{$sRemoteListenPort}:{$sLocalIp}:{$sLocalPort} {$sRemoteUser}@{$sRemoteHost}";
+            $sCmd = "ssh -vvvvv -oPasswordAuthentication=no -oStrictHostKeyChecking=no -i {$sOutRsa} {$sTypeSlot} {$sIpPortMapSlot} {$sRemoteUser}@{$sRemoteHost}";
             $sCmd = "cmd /C ({$sCmd}{$sCmdPostfix}) >NUL";
             $this->log("CMD: {$sCmd}", 'DEBUG');
 
@@ -225,7 +239,7 @@ SH;
             //-f  Requests ssh to go to background just before command execution.
             //-n  Redirects stdin from /dev/null (actually, prevents reading from stdin).
             //-q  Quiet mode. Causes most warning and diagnostic messages to be suppressed.
-            $sCmd = "ssh -vvvvv -oPasswordAuthentication=no -oServerAliveInterval=30 -oTCPKeepAlive=yes -oStrictHostKeyChecking=no -i '{$sOutRsa}' -CfNg -R {$sRemoteListenIp}:{$sRemoteListenPort}:{$sLocalIp}:{$sLocalPort} {$sRemoteUser}@{$sRemoteHost}";
+            $sCmd = "ssh -vvvvv -oPasswordAuthentication=no -oServerAliveInterval=30 -oTCPKeepAlive=yes -oStrictHostKeyChecking=no -i '{$sOutRsa}' {$sTypeSlot} {$sIpPortMapSlot} {$sRemoteUser}@{$sRemoteHost}";
             $sCmd = "{$sCmd}{$sCmdPostfix}";
             $this->log("CMD: {$sCmd}", 'DEBUG');
             $this->execSshCmd($sCmd);
@@ -242,17 +256,24 @@ SH;
             $sOutRsa = "/root/.tunnel-{$sRemoteHost}.key";
         }
 
-        $sRemoteListenPort = $this->getField($arrTunnelConfig, 'remote', 'port', null);
-        $sLocalPort        = $this->getField($arrTunnelConfig, 'local', 'port', null);
-        $sLocalHostName    = gethostname();
-        $sKeyEmail         = "R{$sRemoteListenPort}_forward_to_L{$sLocalPort}@{$sLocalHostName}.tunnel";
+        $sType          = $this->getField($arrTunnelConfig, 'type', null, 'R_to_L');
+        $sRemotePort    = $this->getField($arrTunnelConfig, 'remote', 'port', null);
+        $sLocalPort     = $this->getField($arrTunnelConfig, 'local', 'port', null);
+        $sLocalHostName = gethostname();
+
+        if ($sType === 'R_to_L') {
+            $sKeyEmail = "R{$sRemotePort}_forward_to_L{$sLocalPort}@{$sLocalHostName}.tunnel";
+        } else {
+            $sKeyEmail = "L{$sLocalPort}_forward_to_R{$sRemotePort}@{$sLocalHostName}.tunnel";
+        }
 
         if (file_exists($sOutRsa)) {
             $this->manual($sOutRsa.'.pub', $sKeyEmail, $arrTunnelConfig);
             return;
         }
 
-        $sCmd  = "ssh-keygen -q -t rsa -N '' -f {$sOutRsa} -C {$sKeyEmail}";
+        $sCmd = "ssh-keygen -q -t rsa -N \"\" -f {$sOutRsa} -C {$sKeyEmail}";
+        $this->log("Cmd: {$sCmd}");
         $sLast = exec($sCmd, $arrOutput, $nExitCode);
         if ($nExitCode) {
             throw new RuntimeException("Could not generate ssh private key pair: [{$nExitCode}] {$sLast}");
@@ -312,7 +333,7 @@ CMD;
             2 => ["pipe", "w"],
         ];
 
-        $arrEnv = getenv();
+        $arrEnv = $_ENV;
 
         $arrPipes = [];
         $process  = proc_open($sCmd, $arrDescriptors, $arrPipes, __DIR__, $arrEnv);
@@ -377,10 +398,15 @@ CMD;
 
     public function service()
     {
+        $sSelfFile = __FILE__;
         if ($this->win()) {
-
+            $comShell  = new \COM("winmgmts:\\\\.\\root\\CIMV2");
+            $objNewJob = $comShell->Get("Win32_ScheduledJob");
+            $nOutJobId = 0;
+            $nRet      = $objNewJob->Create("php {$sSelfFile} exec", "********000000.000000+420", 1, 255, 0, 1, $nOutJobId);
+            var_dump($nRet);
         } else {
-            $sSelfFile = __FILE__;
+
             $this->writeCrontab("* * * * * php {$sSelfFile} >/dev/null 2>&1");
         }
     }
@@ -428,8 +454,20 @@ CMD;
     }
 
 
-    private function getField($arrEachTunnelConfig, $sMainField, $sSubField, $sDefault = null)
+    private function getField($arrEachTunnelConfig, $sMainField, $sSubField = null, $sDefault = null)
     {
+        if (empty($sSubField)) {
+            if (empty($arrEachTunnelConfig[$sMainField])) {
+                if (is_null($sDefault)) {
+                    throw new InvalidArgumentException("Missing field: tunnels->{$sMainField} of tunnel in config file: ".$this->m_sConfigFile);
+                }
+
+                return $sDefault;
+            }
+
+            return $arrEachTunnelConfig[$sMainField];
+        }
+
         if (empty($arrEachTunnelConfig[$sMainField][$sSubField])) {
             if (is_null($sDefault)) {
                 throw new InvalidArgumentException("Missing field: tunnels->{$sMainField}->{$sSubField} of tunnel in config file: ".$this->m_sConfigFile);
@@ -485,6 +523,9 @@ try {
         case 'run':
             $tunnel->tunnel();
             break;
+        case 'exec':
+            $tunnel->tunnel(false);
+            break;
         case 'kill':
             $tunnel->kill();
             break;
@@ -492,9 +533,10 @@ try {
             $sHelp = <<<HELP
 Unknown command: {$sAction}
 Usage:
-    {$argv[0]}           Tunneling all
+    {$argv[0]}           Tunneling all and loop
     {$argv[0]} config    Config and deployment remote
-    {$argv[0]} run       Tunneling all
+    {$argv[0]} run       Tunneling all and loop
+    {$argv[0]} exec      Tunneling all and exit process
     {$argv[0]} kill      Killing all running ssh tunnel
     {$argv[0]} service   Register keepalive service to system(using crontab/schedule task)
     {$argv[0]} unservice Unregister keepalive service
