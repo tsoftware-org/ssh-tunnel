@@ -151,7 +151,12 @@ SH;
         $sLocalIp   = $this->getField($arrTunnelConfig, 'local', 'ip', '0.0.0.0');
         $sLocalPort = $this->getField($arrTunnelConfig, 'local', 'port', false);
 
-        $sId = "{$sRemoteIp}:{$sRemotePort}:{$sLocalIp}:{$sLocalPort} {$sRemoteUser}@{$sRemoteHost}";
+        if ($sType === 'R_to_L') {
+            $sId = "{$sRemoteIp}:{$sRemotePort}:{$sLocalIp}:{$sLocalPort} {$sRemoteUser}@{$sRemoteHost}";
+        } else {
+            $sId = "{$sLocalIp}:{$sLocalPort}:{$sRemoteIp}:{$sRemotePort} {$sRemoteUser}@{$sRemoteHost}";
+        }
+
         if ($this->win()) {
             $comShell    = new \COM("winmgmts:\\\\.\\root\\CIMV2");
             $arrColItems = $comShell->ExecQuery("SELECT * FROM Win32_Process WHERE Name = 'ssh.exe'", null, 48);
@@ -215,7 +220,6 @@ SH;
             //https://superuser.com/questions/1296024/windows-ssh-permissions-for-private-key-are-too-open
             $sWinChmod = 'icacls "'.$sOutRsa.'" /inheritance:r && icacls "'.$sOutRsa.'" /grant:r "%username%":"(R)"';
             exec($sWinChmod, $arrOutputs);
-            var_dump($arrOutputs);
 
             $sCmd = "ssh -vvvvv -oPasswordAuthentication=no -oStrictHostKeyChecking=no -i {$sOutRsa} {$sTypeSlot} {$sIpPortMapSlot} {$sRemoteUser}@{$sRemoteHost}";
             $sCmd = "cmd /C ({$sCmd}{$sCmdPostfix}) >NUL";
@@ -241,7 +245,7 @@ SH;
             //-q  Quiet mode. Causes most warning and diagnostic messages to be suppressed.
             $sCmd = "ssh -vvvvv -oPasswordAuthentication=no -oServerAliveInterval=30 -oTCPKeepAlive=yes -oStrictHostKeyChecking=no -i '{$sOutRsa}' {$sTypeSlot} {$sIpPortMapSlot} {$sRemoteUser}@{$sRemoteHost}";
             $sCmd = "{$sCmd}{$sCmdPostfix}";
-            $this->log("CMD: {$sCmd}", 'DEBUG');
+
             $this->execSshCmd($sCmd);
         }
     }
@@ -320,20 +324,21 @@ CMD;
             $sSshCmd = "ssh -oStrictHostKeyChecking=no root@{$sRemoteHost} '{$sCmd}'";
         }
 
-        var_dump($sSshCmd);
         $this->execSshCmd($sSshCmd);
     }
 
 
     private function execSshCmd($sCmd)
     {
+        $this->log("CMD: {$sCmd}", 'DEBUG');
+
         $arrDescriptors = [
             0 => ["pipe", "r"],
             1 => ["pipe", "w"],
             2 => ["pipe", "w"],
         ];
 
-        $arrEnv = $_ENV;
+        $arrEnv = empty($_ENV) ? getenv() : $_ENV;
 
         $arrPipes = [];
         $process  = proc_open($sCmd, $arrDescriptors, $arrPipes, __DIR__, $arrEnv);
@@ -344,8 +349,8 @@ CMD;
             $sStdout   = stream_get_contents($arrPipes[1]);//ask password is in tty, can not catch!
             $sStdError = stream_get_contents($arrPipes[2]);
             //var_dump($sStdout, $sStdError);
-            echo "STDOUT: ".PHP_EOL."----------".PHP_EOL.$sStdout.PHP_EOL;
-            echo "STDERR: ".PHP_EOL."----------".PHP_EOL.$sStdError.PHP_EOL;
+            echo "SSH CMD STDOUT: ".PHP_EOL."----------------".PHP_EOL.$sStdout.PHP_EOL;
+            echo "SSH CMD STDERR: ".PHP_EOL."----------------".PHP_EOL.$sStdError.PHP_EOL;
 
             fclose($arrPipes[0]);
             fclose($arrPipes[1]);
@@ -371,14 +376,11 @@ CMD;
                         exec('taskkill /F /PID '.$nHandle);
                         $this->log("Killed PID: {$nHandle}");
                     }
-
-                    return true;
                 }
             }
         } else {
             $sCmd      = "ps -ef | grep 'oStrictHostKeyChecking=no' | grep -v grep | awk '{ print \$2 }'";
             $nLastLine = exec($sCmd, $arrOutput, $nExitCode);
-            var_dump($arrOutput);
             if ($nExitCode === 0) {
                 if (count($arrOutput)) {
                     $sPids = implode(' ', $arrOutput);
@@ -406,7 +408,6 @@ CMD;
             $nRet      = $objNewJob->Create("php {$sSelfFile} exec", "********000000.000000+420", 1, 255, 0, 1, $nOutJobId);
             var_dump($nRet);
         } else {
-
             $this->writeCrontab("* * * * * php {$sSelfFile} >/dev/null 2>&1");
         }
     }
