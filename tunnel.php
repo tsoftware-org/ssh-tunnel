@@ -16,13 +16,14 @@ class Tunnel
     private $m_hLockFile;
 
     private $m_comShell;
+    private $m_sStatusFile;
 
 
     public function __construct($sConfigFile, $bLogToFile = true)
     {
         $this->m_sConfigFile = $sConfigFile;
         $this->m_bLogToFile  = $bLogToFile;
-
+        $this->m_sStatusFile = sys_get_temp_dir().'/tunnel.status';
         $this->loadConfig();
         if ($this->win()) {
             if (class_exists('\COM')) {
@@ -119,6 +120,7 @@ SH;
         }
 
         while (true) {
+            file_put_contents($this->m_sStatusFile, '');
             foreach ($arrTunnels as $arrTunnel) {
                 if (!$this->checkSshTunnel($arrTunnel)) {
                     $this->makeSshTunnel($arrTunnel);
@@ -193,6 +195,7 @@ SH;
     private function makeSshTunnel($arrTunnelConfig)
     {
         $sType       = $this->getField($arrTunnelConfig, 'type', null, 'R_to_L');
+        $sComment    = $this->getField($arrTunnelConfig, 'comment', null, '');
         $sRemoteHost = $this->getField($arrTunnelConfig, 'remote', 'host', null);
         $sRemoteIp   = $this->getField($arrTunnelConfig, 'remote', 'ip', ($sType === 'R_to_L') ? '0.0.0.0' : '127.0.0.1');
         $sRemotePort = $this->getField($arrTunnelConfig, 'remote', 'port', null);
@@ -221,11 +224,13 @@ SH;
             $sWinChmod = 'icacls "'.$sOutRsa.'" /inheritance:r && icacls "'.$sOutRsa.'" /grant:r "%username%":"(R)"';
             exec($sWinChmod, $arrOutputs);
 
+            //file_put_contents($this->m_sStatusFile, PHP_EOL."============================================".PHP_EOL."{$sComment}".PHP_EOL, FILE_APPEND);
             $sCmd = "ssh -vvvvv -oPasswordAuthentication=no -oStrictHostKeyChecking=no -i {$sOutRsa} {$sTypeSlot} {$sIpPortMapSlot} {$sRemoteUser}@{$sRemoteHost}";
-            $sCmd = "cmd /C ({$sCmd}{$sCmdPostfix}) >NUL";
+            $sCmd = "cmd /C ({$sCmd}{$sCmdPostfix}) > NUL";
             $this->log("CMD: {$sCmd}", 'DEBUG');
 
             $comExec = $this->m_comShell->Exec($sCmd);
+            //echo "STATUS: ".PHP_EOL.file_get_contents($this->m_sStatusFile).PHP_EOL;
             if (!empty($comExec)) {
                 $nPid = $comExec->ProcessID;
                 $this->log("Ssh process started with PID: {$nPid}");
@@ -234,7 +239,7 @@ SH;
             }
         } else {
             $sOutRsa     = "/root/.tunnel-{$sRemoteHost}.key";
-            $sCmdPostfix = " >/dev/null 2>&1 &";
+            $sCmdPostfix = " >>{$this->m_sStatusFile} 2>&1 &";
             chmod($sOutRsa, 0600);
 
             //-C  Requests gzip compression of all data
@@ -295,15 +300,23 @@ SH;
         $sRemoteUser = $this->getField($arrTunnelConfig, 'remote', 'user', 'tunnel');
 
         $sRsaPub = file_get_contents($sOutRsaPubFile);
-
-        $sCmd = <<<CMD
+        if ($sRemoteUser === 'root') {
+            $sUserHome = '/root/';
+            $sCmd = "";
+        } else {
+            $this->log("Creating user: {$sRemoteUser} on host: {$sRemoteHost}", "NOTICE");
+            $sUserHome = "/home/{$sRemoteUser}/";
+            $sCmd =<<<CMD
 adduser {$sRemoteUser} --shell=/bin/false
-mkdir -p /home/{$sRemoteUser}/.ssh/
-chmod 700 /home/{$sRemoteUser}/.ssh/
-touch /home/{$sRemoteUser}/.ssh/authorized_keys && chmod 600 /home/{$sRemoteUser}/.ssh/authorized_keys
-chown {$sRemoteUser}:{$sRemoteUser} -R /home/{$sRemoteUser}/.ssh/
-if ! grep -q "{$sKeyEmail}" "/home/{$sRemoteUser}/.ssh/authorized_keys"; then
-  echo "{$sRsaPub}" | tee -a /home/{$sRemoteUser}/.ssh/authorized_keys
+CMD;
+        }
+        $sCmd .= <<<CMD
+mkdir -p {$sUserHome}.ssh/
+chmod 700 {$sUserHome}.ssh/
+touch {$sUserHome}.ssh/authorized_keys && chmod 600 {$sUserHome}.ssh/authorized_keys
+chown {$sRemoteUser}:{$sRemoteUser} -R {$sUserHome}.ssh/
+if ! grep -q "{$sKeyEmail}" "{$sUserHome}.ssh/authorized_keys"; then
+  echo "{$sRsaPub}" | tee -a {$sUserHome}.ssh/authorized_keys
 fi
 sed -i "s/#GatewayPorts no/GatewayPorts yes/" /etc/ssh/sshd_config
 service sshd restart || systemctl restart sshd
@@ -311,9 +324,7 @@ echo "success"
 exit 0
 
 CMD;
-        $this->log("Creating user: {$sRemoteUser} on host: {$sRemoteHost}", "NOTICE");
         $this->log("If to log in with a password, next enter the password of the root user", "NOTICE");
-
 
         if ($this->win()) {
             $sTmpSh = sys_get_temp_dir().'/.tunnel_tmp.sh';
