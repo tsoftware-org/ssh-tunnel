@@ -225,7 +225,7 @@ SH;
             exec($sWinChmod, $arrOutputs);
 
             //file_put_contents($this->m_sStatusFile, PHP_EOL."============================================".PHP_EOL."{$sComment}".PHP_EOL, FILE_APPEND);
-            $sCmd = "ssh -vvvvv -oPasswordAuthentication=no -oStrictHostKeyChecking=no -i {$sOutRsa} {$sTypeSlot} {$sIpPortMapSlot} {$sRemoteUser}@{$sRemoteHost}";
+            $sCmd = "ssh -vvvvv -oPasswordAuthentication=no -oServerAliveInterval=30 -oServerAliveCountMax=200 -oTCPKeepAlive=yes -oStrictHostKeyChecking=no -i {$sOutRsa} {$sTypeSlot} {$sIpPortMapSlot} {$sRemoteUser}@{$sRemoteHost}";
             $sCmd = "cmd /C ({$sCmd}{$sCmdPostfix}) > NUL";
             $this->log("CMD: {$sCmd}", 'DEBUG');
 
@@ -248,7 +248,7 @@ SH;
             //-f  Requests ssh to go to background just before command execution.
             //-n  Redirects stdin from /dev/null (actually, prevents reading from stdin).
             //-q  Quiet mode. Causes most warning and diagnostic messages to be suppressed.
-            $sCmd = "ssh -vvvvv -oPasswordAuthentication=no -oServerAliveInterval=30 -oTCPKeepAlive=yes -oStrictHostKeyChecking=no -i '{$sOutRsa}' {$sTypeSlot} {$sIpPortMapSlot} {$sRemoteUser}@{$sRemoteHost}";
+            $sCmd = "ssh -vvvvv -oPasswordAuthentication=no -oServerAliveInterval=30 -oServerAliveCountMax=200 -oTCPKeepAlive=yes -oStrictHostKeyChecking=no -i '{$sOutRsa}' {$sTypeSlot} {$sIpPortMapSlot} {$sRemoteUser}@{$sRemoteHost}";
             $sCmd = "{$sCmd}{$sCmdPostfix}";
 
             $this->execSshCmd($sCmd);
